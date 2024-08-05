@@ -1,2 +1,2 @@
 Ce répertoire GitHub a été créé dans le cadre de mon mémoire intitulé "Étude de l’effet de la complexité du récif corallien de Polynésie française sur les communautés d'invertébrés par la technique de photogrammétrie". 
-Il a pour objectif de rendre disponibles les codes R et Python que j'ai utilisés pour la collecte et l'analyse des données sur la diversité des invertébrés et la complexité morphologique des coraux de Polynésie Française.
+Il a pour objectif de rendre disponibles les codes R et Python que j'ai utilisé pour la collecte et l'analyse des données sur la diversité des invertébrés et la complexité morphologique des coraux de Polynésie Française.
