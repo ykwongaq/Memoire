@@ -528,6 +528,7 @@ legend("topright",
 ```{r}
 # Charger les données
 # data <- as.data.frame(read_csv("/Users/chloedouady/Library/CloudStorage/OneDrive-UniversitéLibredeBruxelles/M2/Mémoire/invertebres/tableau_d'identification_des_invertebres_final1.csv"))  
+
 file_path <- "C:\\Users\\Honor\\OneDrive - Université Libre de Bruxelles\\M2\\Mémoire\\invertebres\\tableau_d'identification_des_invertebres_final1.csv"
 data <- as.data.frame(read_csv(file_path))
 rownames(data) <- data$echantillons
@@ -559,11 +560,11 @@ p <- ggplot(nmds_scores, aes(x = MDS1, y = MDS2, colour = type, shape = site)) +
        x = "Dimension 1",
        y = "Dimension 2") +
   theme(legend.position = "right") +
-  scale_color_manual(values = c("A" = "#619CFF", "D" = "#F8766D", "DA" = "#44BB99")) +
+  scale_color_manual(name = "État du corail", values = c("A" = "#619CFF", "D" = "#F8766D", "DA" = "#44BB99")) +
   #scale_shape_manual(values = c("Moorea" = 20, "Tahiti" = 17, "Tetiaroa" = 4)) +
   #scale_color_manual(values = c("Moorea" = "blue", "Tahiti" = "red", "Tetiaroa" = "green")) +
   #scale_color_manual(values = c("low" = "#619CFF", "high" = "#F8766D")) +
-  scale_shape_manual(values = c("PIH" = 16, "TIA" = 17, "BOU" = 18, "UNU" = 4, "DIA" = 15, "GRO" = 8)) +
+  scale_shape_manual(name = "Sites", values = c("PIH" = 16, "TIA" = 17, "BOU" = 18, "UNU" = 4, "DIA" = 15, "GRO" = 8)) +
   scale_x_continuous(name = "Dimension 1", breaks = seq(-2, 2, by = 0.5), limits = c(-2, 2)) +
   scale_y_continuous(name = "Dimension 2", breaks = seq(-2, 2, by = 0.5), limits = c(-2, 2))
 
@@ -574,66 +575,6 @@ p <- p + annotate("text", x = Inf, y = Inf, label = sprintf("ANOSIM R = %.2f\np-
 print(p)
 
 # Un faible stress signifie que les distances entre les points dans l'espace de dimensions réduites reflètent bien les distances originales entre les échantillons. Généralement, un stress inférieur à 0.1 est considéré comme une bonne représentation, entre 0.1 et 0.2 est acceptable, et au-dessus de 0.2, la représentation devient de moins en moins fiable.
-```
-
-```{r}
-# Charger les bibliothèques nécessaires
-library(readr)
-library(dplyr)
-library(vegan)
-library(ggplot2)
-
-# Lire le fichier CSV
-file_path <- "C:\\Users\\Honor\\OneDrive - Université Libre de Bruxelles\\M2\\Mémoire\\invertebres\\tableau_d'identification_des_invertebres_final1.csv"
-data <- as.data.frame(read_csv(file_path))
-rownames(data) <- data$echantillons
-
-# Calculer la distance de Bray-Curtis entre les échantillons
-dist_chloe <- vegdist(data[, 7:49], method = "bray", diag = TRUE)
-
-# Effectuer la NMDS
-nmds_chloe <- metaMDS(dist_chloe, k = 2, trymax = 100)
-
-# Préparer les données pour ggplot
-nmds_scores <- as.data.frame(nmds_chloe$points)
-nmds_scores$cover <- factor(data[, 5], levels = c("high", "low"))
-nmds_scores$site <- factor(data[, 2], levels = c("TIA", "PIH", "UNU", "BOU", "DIA", "GRO"))
-nmds_scores$type <- factor(data[, 4], levels = c("A", "D", "DA"))
-nmds_scores$island <- factor(data[, 1], levels = c("Moorea", "Tahiti", "Tetiaroa"))
-
-# Fusionner les catégories "D" et "DA" en une seule catégorie "D/DA"
-nmds_scores$type <- as.character(nmds_scores$type)
-nmds_scores$type[nmds_scores$type %in% c("D", "DA")] <- "D/DA"
-nmds_scores$type <- factor(nmds_scores$type, levels = c("A", "D/DA"))
-
-# Vérifier le nombre de réplicats par groupe après fusion
-table(nmds_scores$type)
-
-# Test de permutation pour NMDS (ANOSIM)
-anosim_result <- anosim(dist_chloe, nmds_scores$type)
-print(anosim_result)
-
-# Plot NMDS avec ggplot2
-p <- ggplot(nmds_scores, aes(x = MDS1, y = MDS2, colour = type, shape = site)) +
-  geom_point(size = 3) +
-  stat_ellipse(aes(group = type), level = 0.95, linetype = 2) +
-  theme_minimal() +
-  labs(title = "NMDS de la structure des communautés d'invertébrés",
-       subtitle = paste("Stress =", round(nmds_chloe$stress, 3)),
-       x = "Dimension 1",
-       y = "Dimension 2") +
-  theme(legend.position = "right") +
-  scale_color_manual(values = c("A" = "#619CFF", "D/DA" = "#F8766D")) +
-  scale_shape_manual(values = c("PIH" = 16, "TIA" = 17, "BOU" = 18, "UNU" = 4, "DIA" = 15, "GRO" = 8)) +
-  scale_x_continuous(name = "Dimension 1", breaks = seq(-2, 2, by = 0.5), limits = c(-2, 2)) +
-  scale_y_continuous(name = "Dimension 2", breaks = seq(-2, 2, by = 0.5), limits = c(-2, 2))
-
-# Ajouter le résultat du test de permutation
-p <- p + annotate("text", x = Inf, y = Inf, label = sprintf("ANOSIM R = %.2f\np-value = %.3f", anosim_result$statistic, anosim_result$signif), hjust = 1.1, vjust = 1, color = "black")
-
-# Afficher le graphique
-print(p)
-
 ```
 
 

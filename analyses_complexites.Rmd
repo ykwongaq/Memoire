@@ -1,0 +1,211 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+# Charger les bibliothèques nécessaires
+library(ggplot2)
+library(dplyr)
+library(ggpubr)
+library(patchwork)
+library(gridExtra)
+# install.packages("lmtest")
+library(lmtest)
+
+# Lire le fichier CSV modifié
+data <- read.csv("/Users/chloedouady/Library/CloudStorage/OneDrive-UniversitéLibredeBruxelles/M2/Mémoire/mesures_complexites/resultats/global_results_final_modifie.csv")
+
+# Nettoyage des données
+print(data)
+# Supprimer des lignes 
+data <- data[-c(10, 37, 11, 18, 19, 20, 33, 25, 38, 39, 40, 46, 44, 69, 45, 100, 102, 64, 14, 23, 77, 80, 82, 84, 85, 86), ]
+write.csv(data, "/Users/chloedouady/Library/CloudStorage/OneDrive-UniversitéLibredeBruxelles/M2/Mémoire/mesures_complexites/resultats/tableau_resultats_complexite.csv", row.names = FALSE)
+
+# Correlogramme 
+
+# # Sélectionner les colonnes d'intérêt
+# variables <- data %>%
+#   select(R, H, D)
+# 
+# # Calculer la matrice de corrélation
+# corr_matrix <- cor(variables, use = "complete.obs")
+# 
+# # Créer le correlogramme
+# corrplot(corr_matrix, method = "circle", type = "full",
+#          tl.cex = 0.8, # Taille du texte des labels
+#          addCoef.col = "black", # Ajouter les coefficients de corrélation
+#          number.cex = 0.7) # Taille du texte des coefficients
+```
+
+# Test de normalité et d'homoscédasticité
+```{r}
+# Test de Shapiro-Wilk
+shapiro_test_D <- shapiro.test(data$D)
+shapiro_test_H <- shapiro.test(data$H)
+shapiro_test_R <- shapiro.test(data$R)
+
+# Afficher les résultats
+print(shapiro_test_D)
+print(shapiro_test_H)
+print(shapiro_test_R)
+
+# Pour les trois variables (D, H, et R), les résultats du test de Shapiro-Wilk montrent toutes des valeurs p très faibles, bien en dessous du seuil de signification de 0.05. Cela signifie que les distributions de toutes ces variables ne suivent pas une distribution normale.
+
+
+# Homoscedasticité
+
+# Ajuster les modèles linéaires
+model_lm_H_D <- lm(H ~ poly(D, 2), data = data)
+model_lm_R_D <- lm(R ~ poly(D, 2), data = data)
+model_lm_H_R <- lm(H ~ poly(R, 2), data = data)
+
+# Obtenir les résidus et les valeurs prédites pour chaque modèle
+residuals_H_D <- resid(model_lm_H_D)
+fitted_values_H_D <- fitted(model_lm_H_D)
+
+residuals_R_D <- resid(model_lm_R_D)
+fitted_values_R_D <- fitted(model_lm_R_D)
+
+residuals_H_R <- resid(model_lm_H_R)
+fitted_values_H_R <- fitted(model_lm_H_R)
+
+# Tracer les résidus vs. valeurs prédites pour chaque modèle
+plot_residuals_vs_fitted <- function(residuals, fitted_values, title) {
+  ggplot(data, aes(x = fitted_values, y = residuals)) +
+    geom_point() +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+    theme_minimal() +
+    labs(x = "Valeurs Prédites", y = "Résidus", title = title)
+}
+
+# Graphiques des résidus vs. valeurs prédites
+plot_H_D <- plot_residuals_vs_fitted(residuals_H_D, fitted_values_H_D, "Graphique des Résidus vs. Valeurs Prédites pour H ~ poly(D, 2)")
+plot_R_D <- plot_residuals_vs_fitted(residuals_R_D, fitted_values_R_D, "Graphique des Résidus vs. Valeurs Prédites pour R ~ poly(D, 2)")
+plot_H_R <- plot_residuals_vs_fitted(residuals_H_R, fitted_values_H_R, "Graphique des Résidus vs. Valeurs Prédites pour H ~ poly(R, 2)")
+
+# Afficher les graphiques
+grid.arrange(plot_H_D, plot_R_D, plot_H_R, nrow = 3)
+
+# Effectuer les tests de Breusch-Pagan pour chaque modèle
+bptest_H_D <- bptest(model_lm_H_D)
+bptest_R_D <- bptest(model_lm_R_D)
+bptest_H_R <- bptest(model_lm_H_R)
+
+# Afficher les résultats des tests
+print("Test de Breusch-Pagan pour H ~ poly(D, 2):")
+print(bptest_H_D)
+
+print("Test de Breusch-Pagan pour R ~ poly(D, 2):")
+print(bptest_R_D)
+
+print("Test de Breusch-Pagan pour H ~ poly(R, 2):")
+print(bptest_H_R)
+
+# p-value < 0.05 indique une présence significative d'hétéroscédasticité dans les résidus du modèle H ~ poly(D, 2)
+# p-value > 0.05 indique aucune preuve significative d'hétéroscédasticité dans les résidus du modèle R ~ poly(D, 2)
+# p-value > 0.05 mais proche du seuil indique une tendance vers l'hétéroscédasticité dans les résidus du modèle D ~ poly(D, 2)
+```
+
+# Scatterplots 
+```{r}
+# Fonction pour ajuster les modèles et calculer le pseudo-R²
+calculate_pseudo_r2 <- function(model) {
+  1 - (model$deviance / model$null.deviance)
+}
+
+# Fonction pour extraire les p-values des modèles
+extract_pvalues <- function(model) {
+  summary(model)$coefficients[,"Pr(>|t|)"]
+}
+
+# Graphiques avec ajustement des modèles quadratiques en utilisant la famille Gamma
+a_gamma <- ggplot(data, aes(x = D, y = H, colour = coral_cover)) +
+  geom_point() +
+  geom_smooth(method = "glm", formula = y ~ poly(x, 2), method.args = list(family = Gamma()), se = TRUE) + # Quadratique avec Gamma
+  labs(color = "Couverture corallienne") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+b_gamma <- ggplot(data, aes(x = D, y = R, colour = coral_cover)) +
+  geom_point() +
+  geom_smooth(method = "glm", formula = y ~ poly(x, 2), method.args = list(family = Gamma()), se = TRUE) + # Quadratique avec Gamma
+  labs(color = "Couverture coralliene") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+c_gamma <- ggplot(data, aes(x = R, y = H, colour = coral_cover)) +
+  geom_point() +
+  geom_smooth(method = "glm", formula = y ~ poly(x, 2), method.args = list(family = Gamma()), se = TRUE) + # Quadratique avec Gamma
+  labs(color = "Couverture corallienne") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+# Ajuster les modèles quadratiques avec glm et la famille Gamma
+model_a_gamma <- glm(H ~ poly(D, 2), data = data, family = Gamma())
+pseudo_r2_a_gamma <- calculate_pseudo_r2(model_a_gamma)
+pvalues_a_gamma <- extract_pvalues(model_a_gamma)
+
+model_b_gamma <- glm(R ~ poly(D, 2), data = data, family = Gamma())
+pseudo_r2_b_gamma <- calculate_pseudo_r2(model_b_gamma)
+pvalues_b_gamma <- extract_pvalues(model_b_gamma)
+
+model_c_gamma <- glm(H ~ poly(R, 2), data = data, family = Gamma())
+pseudo_r2_c_gamma <- calculate_pseudo_r2(model_c_gamma)
+pvalues_c_gamma <- extract_pvalues(model_c_gamma)
+
+# Ajouter annotations pour pseudo-R² et p-values
+a_gamma <- a_gamma + annotate("text", x = Inf, y = Inf, 
+                              label = paste("Pseudo-R² =", round(pseudo_r2_a_gamma, 2), "\n",
+                                            "p-value =", format.pval(pvalues_a_gamma[2], digits = 3)), 
+                              hjust = 1.1, vjust = 1.5)
+
+b_gamma <- b_gamma + annotate("text", x = min(data$D), y = max(data$R), 
+                              label = paste("Pseudo-R² =", round(pseudo_r2_b_gamma, 2), "\n",
+                                            "p-value =", format.pval(pvalues_b_gamma[2], digits = 3)), 
+                              hjust = -0, vjust = 1.5)
+
+c_gamma <- c_gamma + annotate("text", x = -Inf, y = Inf, 
+                              label = paste("Pseudo-R² =", round(pseudo_r2_c_gamma, 2), "\n",
+                                            "p-value =", format.pval(pvalues_c_gamma[2], digits = 3)), 
+                              hjust = -0.1, vjust = 1.5)
+
+# Combiner les graphiques avec une légende commune et ajouter un titre
+combined_plot_gamma <- ggarrange(a_gamma, b_gamma, c_gamma, nrow = 3, ncol = 1, common.legend = TRUE, legend = "right")
+
+# Afficher le graphique combiné
+print(combined_plot_gamma)
+
+
+```
+
+# Test de corrélation de Spearman 
+```{r}
+# Calcul des coefficients de Spearman et des p-values pour chaque paire de variables
+cor_spearman_DH <- cor.test(data$D, data$H, method = "spearman")
+cor_spearman_DR <- cor.test(data$D, data$R, method = "spearman")
+cor_spearman_RH <- cor.test(data$R, data$H, method = "spearman")
+
+# Créer un tableau pour stocker les résultats
+results <- data.frame(
+  Variables = c("D vs H", "D vs R", "R vs H"),
+  Spearman_Rho = c(cor_spearman_DH$estimate, cor_spearman_DR$estimate, cor_spearman_RH$estimate),
+  p_value = c(cor_spearman_DH$p.value, cor_spearman_DR$p.value, cor_spearman_RH$p.value)
+)
+
+# Afficher le tableau
+print(results)
+
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+

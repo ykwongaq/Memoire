@@ -1,0 +1,263 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+# Installer les packages nécessaires
+# install.packages("ggplot2")
+# install.packages("ggpubr")
+# install.packages("mgcv")
+# install.packages("vegan")
+# install.packages("corrplot")
+# install.packages("dplyr")
+# install.packages("DT")
+# install.packages('lmtest')
+
+# Charger les bibliothèques
+library(ggplot2)
+library(ggpubr)
+library(mgcv)
+library(vegan)
+library(corrplot)
+library(dplyr)
+library(gridExtra)
+library(lmtest)
+
+# Lire le fichier CSV modifié
+data <- read.csv("C:\\Users\\Honor\\OneDrive - Université Libre de Bruxelles\\M2\\Mémoire\\resultats_combines.csv")
+
+data <- data %>% select(-sample_code)
+```
+
+# Correlogramme des varaibles de diversités 
+```{r}
+# Sélectionner les colonnes d'intérêt
+variables <- data %>%
+  select(simpson, shannon, pielou, richesse, abondance)
+
+# Calculer la matrice de corrélation
+corr_matrix <- cor(variables, use = "complete.obs")
+
+# Créer le correlogramme
+corrplot(corr_matrix, method = "circle", type = "full",
+         tl.cex = 0.8, # Taille du texte des labels
+         addCoef.col = "black", # Ajouter les coefficients de corrélation
+         number.cex = 0.7) # Taille du texte des coefficients
+
+# Résultats : shannon/simpson = 0.94, shannon/richesse = 0.92 et richesse/abondance = 0.88 choisi shannon et enlève simpson et richesse car elles sont très corrélées avec shannon. 
+```
+
+# Test de normalité
+```{r}
+# Test de Shapiro-Wilk
+shapiro_tests <- list(
+  D = shapiro.test(data$D),
+  H = shapiro.test(data$H),
+  R = shapiro.test(data$R),
+  abondance = shapiro.test(data$abondance),
+  # richesse = shapiro.test(data$richesse),
+  shannon = shapiro.test(data$shannon),
+  # simpson = shapiro.test(data$simpson),
+  pielou = shapiro.test(data$pielou)
+)
+
+# Afficher les résultats des tests de Shapiro-Wilk
+for (var in names(shapiro_tests)) {
+  cat(sprintf("Shapiro-Wilk test for %s: W = %.2f, p-value = %.2e\n", var, shapiro_tests[[var]]$statistic, shapiro_tests[[var]]$p.value))
+}
+
+``` 
+
+# Test d'homoscédasticité 
+```{r}
+# Fonction pour ajuster le modèle, obtenir les résidus et les valeurs prédites, et tracer les graphiques
+process_model <- function(formula, data, title) {
+  model <- lm(formula, data = data)
+  residuals <- resid(model)
+  fitted_values <- fitted(model)
+  
+  # Graphique des résidus vs. valeurs prédites
+  plot <- ggplot(data, aes(x = fitted_values, y = residuals)) +
+    geom_point() +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+    theme_minimal() +
+    labs(x = "Valeurs Prédites", y = "Résidus", title = title)
+  
+  return(list(model = model, plot = plot))
+}
+
+# Liste des formules et titres pour chaque modèle
+formulas_and_titles <- list(
+  list(formula = abondance ~ poly(D, 2), title = "Abondance ~ poly(D, 2)"),
+  list(formula = shannon ~ poly(D, 2), title = "Shannon ~ poly(D, 2)"),
+  list(formula = pielou ~ poly(D, 2), title = "Pielou ~ poly(D, 2)"),
+  list(formula = abondance ~ poly(R, 2), title = "Abondance ~ poly(R, 2)"),
+  list(formula = shannon ~ poly(R, 2), title = "Shannon ~ poly(R, 2)"),
+  list(formula = pielou ~ poly(R, 2), title = "Pielou ~ poly(R, 2)"),
+  list(formula = abondance ~ poly(H, 2), title = "Abondance ~ poly(H, 2)"),
+  list(formula = shannon ~ poly(H, 2), title = "Shannon ~ poly(H, 2)"),
+  list(formula = pielou ~ poly(H, 2), title = "Pielou ~ poly(H, 2)")
+)
+
+# Appliquer la fonction et stocker les résultats
+results <- lapply(formulas_and_titles, function(ft) process_model(ft$formula, data, ft$title))
+
+# Tracer tous les graphiques dans une grille
+plots <- lapply(results, function(result) result$plot)
+grid.arrange(grobs = plots, nrow = 3)
+
+# Fonction pour effectuer les tests de Breusch-Pagan
+perform_bptest <- function(model) {
+  bptest(model)
+}
+
+# Appliquer les tests de Breusch-Pagan et afficher les résultats
+bptest_results <- lapply(results, function(result) perform_bptest(result$model))
+
+# Afficher les résultats des tests de Breusch-Pagan
+for (i in seq_along(bptest_results)) {
+  cat(sprintf("Test de Breusch-Pagan pour %s:\n", formulas_and_titles[[i]]$title))
+  print(bptest_results[[i]])
+  cat("\n")
+}
+
+```
+
+# Scatterplots 
+```{r}
+# Fonction pour ajuster les modèles et calculer le pseudo-R²
+calculate_pseudo_r2 <- function(model) {
+  1 - (model$deviance / model$null.deviance)
+}
+
+# Fonction pour extraire les p-values des modèles
+extract_pvalues <- function(model) {
+  summary(model)$coefficients[,"Pr(>|t|)"]
+}
+
+# Définir les variables
+variables_x <- c("D", "H", "R")
+variables_y <- c("abondance", "shannon", "pielou")
+
+# Initialiser les listes pour stocker les graphiques par groupe de variables
+plots_D <- list()
+plots_H <- list()
+plots_R <- list()
+
+# Initialiser les listes pour stocker les modèles et les pseudo-R²
+models_gamma <- list()
+pseudo_r2_gamma <- list()
+
+# Boucle pour créer les graphiques et ajuster les modèles
+for (x_var in variables_x) {
+  for (y_var in variables_y) {
+    if (x_var != y_var) {
+      # Créer les graphiques avec les modèles Gamma
+      plot <- ggplot(data, aes_string(x = x_var, y = y_var, colour = "coral_cover")) +
+        labs(color = "Couverture corallienne") +
+        geom_point() +
+        geom_smooth(method = glm, formula = y ~ poly(x, 2), method.args = list(family = Gamma()), se = TRUE) +
+        theme_minimal() +
+        theme(legend.position = "right")
+      
+      # Ajuster le modèle Gamma
+      model_name <- paste0("model_", x_var, "_", y_var)
+      model <- glm(as.formula(paste(y_var, "~ poly(", x_var, ", 2)")), data = data, family = Gamma())
+      models_gamma[[model_name]] <- model
+      pseudo_r2_gamma[[model_name]] <- calculate_pseudo_r2(model)
+      
+      # Extraire les p-values
+      pvalues <- extract_pvalues(model)
+      
+      # Ajouter les annotations pour pseudo-R² et p-values
+      annotation_x <- -Inf
+      annotation_y <- Inf
+      hjust_val <- -0.1
+      vjust_val <- 1.5
+      
+      # Positionner les annotations en haut à gauche pour les graphiques Shannon et Pielou de la variable D
+      if (x_var == "D" && (y_var == "pielou")) {
+        annotation_x <- -Inf
+        annotation_y <- Inf
+        hjust_val <- -0.1
+        vjust_val <- 1.1
+      } else {
+        annotation_x <- Inf
+        annotation_y <- Inf
+        hjust_val <- 1.1
+        vjust_val <- 1.5
+      }
+      
+      plot <- plot +
+        annotate("text", x = annotation_x, y = annotation_y, 
+                 label = paste("Pseudo-R² =", round(pseudo_r2_gamma[[model_name]], 2), "\n",
+                               "p-value =", format.pval(pvalues[2], digits = 3)), 
+                 hjust = hjust_val, vjust = vjust_val)
+      
+      # Ajouter le graphique à la liste appropriée
+      if (x_var == "D") {
+        plots_D[[length(plots_D) + 1]] <- plot
+      } else if (x_var == "H") {
+        plots_H[[length(plots_H) + 1]] <- plot
+      } else if (x_var == "R") {
+        plots_R[[length(plots_R) + 1]] <- plot
+      }
+    }
+  }
+}
+
+# Combiner les graphiques pour chaque groupe de variables
+combined_plot_D <- ggarrange(plotlist = plots_D, nrow = 1, ncol = 3, common.legend = TRUE, legend = "right")
+combined_plot_H <- ggarrange(plotlist = plots_H, nrow = 1, ncol = 3, common.legend = TRUE, legend = "right")
+combined_plot_R <- ggarrange(plotlist = plots_R, nrow = 1, ncol = 3, common.legend = TRUE, legend = "right")
+
+# Afficher les graphiques combinés
+print(combined_plot_D)
+print(combined_plot_H)
+print(combined_plot_R)
+
+```
+
+# Test de coefficient de Spearman 
+```{r}
+# Créer un data frame pour stocker les résultats
+results <- data.frame(
+  x_var = character(),
+  y_var = character(),
+  spearman_rho = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Calculer les coefficients de corrélation de Spearman et les p-values
+for (x_var in variables_x) {
+  for (y_var in variables_y) {
+    cor_test <- cor.test(data[[x_var]], data[[y_var]], method = "spearman")
+    results <- rbind(results, data.frame(
+      x_var = x_var,
+      y_var = y_var,
+      spearman_rho = cor_test$estimate,
+      p_value = cor_test$p.value
+    ))
+  }
+}
+
+# Afficher les résultats
+print(results)
+
+```
+
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
