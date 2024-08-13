@@ -1,0 +1,645 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+# Données Brut
+```{r}
+# Utiliser les outlines pour naviguer plus facilement dans le code
+
+## Calcule richesse, abondance et indices sur le tableau brut ##
+
+# Installer la bibliothèque 
+# install.packages("readr")
+# install.packages("dplyr")
+# install.packages("vegan")
+# install.packages("tidyr")
+# install.packages("tidyverse")
+# install.packages("ggplot2")
+# install.packages("ggridges")
+# install.packages("dendextend")
+# install.packages("ggdendro")
+# install.packages("patchwork")
+# install.packages("ggpubr")
+
+
+# Charger la bibliothèque
+library(readr)
+library(dplyr)
+library(vegan)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(ggridges)
+library(dendextend) # Pour manipuler les dendrogrammes
+library(ggdendro)
+library(patchwork)
+library(ggpubr)
+
+# Charger le tableau 
+library(readxl)
+data <- read_excel("tableau_d'identification_des_invertebres_sans_photos.xlsx")
+
+# Enlever la ligne nommée "total" dans la colonne island
+data <- subset(data, island != "total")
+
+as_tibble(data) # pour voir le tableau directement dans la console  
+
+# Transformer les NA en 0
+tableau_brut <- data %>% 
+  filter(size != "S") %>% 
+  group_by(island, site, date, colony, sample_code, coral_type, size) %>% 
+  summarise(across(morphotype_1:morphotype_43, ~ sum(., na.rm = TRUE)), .groups = 'drop') %>% 
+  ungroup() %>%
+  mutate(echantillons = paste(site, colony, sep = ".")) %>% # Ajoute une colonne 'echantillons'
+  mutate(coral_cover = case_when(  # Définir les règles pour la colonne coral_cover
+    island == "Moorea" ~ "low",
+    island == "Tahiti" ~ "high",
+    island == "Tetiaroa" & site == "UNU" ~ "low",
+    island == "Tetiaroa" & site == "BOU" ~ "high",
+    TRUE ~ NA_character_  # Gestion des cas non prévus
+  )) %>%
+  select(island, site, colony, coral_type, coral_cover, echantillons, starts_with("morphotype_"))  %>% # Réorganiser l'ordre des colonnes
+  group_by(island, site, colony, coral_type, coral_cover, echantillons,) %>%
+  summarise(across('morphotype_1':'morphotype_43', ~ sum(., na.rm = TRUE))) %>%
+  ungroup()
+
+# Afficher le tableau brut sous forme de tibble dans la console
+as_tibble(tableau_brut)
+    
+# calculer l'abondance (nb d'ind par sp)
+abondance <- tableau_brut %>% 
+  mutate(abondance = rowSums(across('morphotype_1':'morphotype_43'), na.rm = T)) %>%
+  select(island:echantillons, abondance, morphotype_1:morphotype_43) 
+
+as_tibble(abondance)
+
+# calculer la richesse (nb total d'sp dif)
+richesse <- abondance %>% 
+  mutate(across('morphotype_1':'morphotype_43', ~ case_when(.x != 0 ~ 1, TRUE ~ .x))) %>% 
+  mutate(richesse = rowSums(across('morphotype_1':'morphotype_43'), na.rm = T)) %>% 
+  select(island:echantillons, abondance, richesse) %>% 
+  filter(richesse != 0)
+
+as_tibble(richesse)
+
+# Calculer les indices de Shannon et de Simpson
+indices_diversite <- abondance %>%
+  rowwise() %>%
+  mutate(
+    shannon = diversity(c_across(starts_with('morphotype')), index = "shannon"),
+    simpson = diversity(c_across(starts_with('morphotype')), index = "simpson")
+  ) %>%
+  ungroup() %>%
+  select(island:echantillons, shannon, simpson)
+
+# Calculer l'indice de Pielou
+indice_pielou <- indices_diversite %>%
+  left_join(richesse, by = c("echantillons")) %>%
+  mutate(pielou = shannon / log(richesse)) %>%
+  select(echantillons, pielou)
+
+# Créer le tableau final en ajoutant toutes les mesures calculées au tableau initial
+tableau_final <- tableau_brut %>%
+  left_join(abondance %>% select(echantillons, abondance), by = "echantillons") %>%
+  left_join(richesse %>% select(echantillons, richesse), by = "echantillons") %>%
+  left_join(indices_diversite %>% select(echantillons, shannon, simpson), by = "echantillons") %>%
+  left_join(indice_pielou %>% select(echantillons, pielou), by = "echantillons")
+
+
+# Nettoyage des données
+print(tableau_final)
+# Supprimer des lignes 
+tableau_final <- tableau_final[-c(3,6, 17, 25, 29, 30, 34, 36, 55, 60, 64, 81, 83, 87, 93, 95, 100), ]
+# Affichage du data frame modifié
+print(tableau_final)
+
+write.csv(tableau_final, "tableau_d'identification_des_invertebres_final1.csv", row.names = F)
+
+```
+
+
+# Boxplots par type de corail 
+```{r}
+# Définir les couleurs manuellement avec les couleurs par défaut mais plus claires
+color_palette <- c("A" = "#1f77b4",  # Bleu clair
+                   "D" = "#ff9999",  # Rouge clair
+                   "DA" = "#2ca02c") # Vert clair
+
+a <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = richesse, colour = coral_type)) +
+  #labs(title = "Richesse par type de corail et îles") +
+  scale_colour_manual(values = color_palette) +  # Définir les couleurs manuellement
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+b <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = abondance, colour = coral_type)) +
+  #labs(title = "Abondance par type de corail et îles") +
+  scale_colour_manual(values = color_palette) +  # Définir les couleurs manuellement
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+c <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = shannon, colour = coral_type)) +
+  #labs(title = "Indice de Shannon par type de corail et taux de recouvrement") +
+  scale_colour_manual(values = color_palette) +  # Définir les couleurs manuellement
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+d <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = simpson, colour = coral_type)) +
+  #labs(title = "Indice de Simpson par type de corail et site") +
+  scale_colour_manual(values = color_palette) +  # Définir les couleurs manuellement
+  scale_y_continuous(limits = c(0.4, NA)) +  # Définir les limites de l'axe y
+  theme_minimal() +
+  facet_grid( ~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+e <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = pielou, colour = coral_type)) +
+  #labs(title = "Indice de Pielou par type de corail et îles") +
+  scale_colour_manual(values = color_palette) +  # Définir les couleurs manuellement
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+# Combiner les graphiques avec une légende commune et ajouter un titre
+# combined_plot <- (a + b + c) / (d + e) + plot_layout(guides = "collect") +
+#   plot_annotation(title = "Boxplots par taux de recouvrement et types de corail")
+# Afficher le graphique combiné avec le titre
+# print(combined_plot)
+
+ggarrange(a, b, c, d, e, nrow = 5, ncol = 1, common.legend = T,  legend = "right")
+
+
+```
+
+# Boxplots par sites 
+```{r}
+a <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = richesse, colour = site)) +
+  #labs(title = "Richesse par sites et type de corail") +
+  theme_minimal() +
+  facet_grid(~ island) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+b <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = abondance, colour = site)) +
+  #labs(title = "Abondance par sites et type de corail") +
+  theme_minimal() +
+  facet_grid(~ island) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+c <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = shannon, colour = site)) +
+  #labs(title = "Indice de Shannon par sites") +
+  theme_minimal() +
+  facet_grid(~island) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+d <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = simpson, colour = site)) +
+  #labs(title = "Indice de Simpson par sites") +
+  scale_y_continuous(limits = c(0.4, NA)) +  # Définir les limites de l'axe y
+  theme_minimal() +
+  facet_grid(~ island) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+e <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = pielou, colour = site)) +
+  #labs(title = "Indice de Pielou par sites") +
+  theme_minimal() +
+  facet_grid(~ island) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+ggarrange(a, b, c, d, e, nrow = 5, ncol = 1, common.legend = T,  legend = "right")
+
+```
+
+# Boxplots sites et coral_type
+```{r}
+library(ggplot2)
+library(patchwork)
+library(RColorBrewer)
+
+# Définir les couleurs pour chaque site avec des teintes plus vives
+site_colors <- c(
+  "TIA" = "#BBDEFB",  # Rouge vif
+  "PIH" = "#64B5F6",  # Orange vif
+  "UNU" = "#81C784",  # Jaune vif
+  "BOU" = "#FDD835",  # Vert vif
+  "DIA" = "#F48FB1",  # Bleu moyen
+  "GRO" = "#E57373"   # Bleu clair
+)
+
+# Modifier l'ordre des sites dans la légende
+site_order <- c("TIA", "PIH", "UNU", "BOU", "DIA", "GRO")
+# Moorea : TIA et PIH; Tetiaroa : UNU et BOU; Tahiti : DIA et GRO. TIA/PIH/UNU : bas recouvrement et BOU/DIA/GRO : haut recouvrement 
+
+# Assurez-vous que la variable 'site' est factorisée dans l'ordre souhaité
+tableau_final$site <- factor(tableau_final$site, levels = site_order)
+
+a <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = abondance, colour = site)) +
+  scale_color_manual(values = site_colors, breaks = site_order) +
+  labs(color = "Sites") +  # Ajouter le titre de la légende
+  theme_minimal() +
+  facet_grid(. ~ coral_type) +
+  theme(axis.text.x = element_blank(),
+        strip.placement = "outside",
+        legend.position = "top",
+        legend.direction = "vertical",  # Légende en une colonne
+        legend.box = "horizontal",  # Gérer l'orientation de la légende
+        legend.key.size = unit(0.5, "cm"),  # Ajuster la taille des clés
+        legend.text = element_text(size = 8))  # Ajuster la taille du texte de la légende
+
+b <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = richesse, colour = site)) +
+  scale_color_manual(values = site_colors, breaks = site_order) +
+  #scale_y_continuous(limits = c(NA, 2.7)) +
+  labs(color = "Sites") +  # Ajouter le titre de la légende
+  theme_minimal() +
+  facet_grid(. ~ coral_type) +
+  theme(axis.text.x = element_blank(),
+        strip.placement = "outside",
+        legend.position = "top",
+        legend.direction = "vertical",  # Légende en une colonne
+        legend.box = "horizontal",  # Gérer l'orientation de la légende
+        legend.key.size = unit(0.5, "cm"),  # Ajuster la taille des clés
+        legend.text = element_text(size = 8))  # Ajuster la taille du texte de la légende
+
+c <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = shannon, colour = site)) +
+  scale_color_manual(values = site_colors, breaks = site_order) +
+  #scale_y_continuous(limits = c(NA, 2.7)) +
+  labs(color = "Sites") +  # Ajouter le titre de la légende
+  theme_minimal() +
+  facet_grid(. ~ coral_type) +
+  theme(axis.text.x = element_blank(),
+        strip.placement = "outside",
+        legend.position = "top",
+        legend.direction = "vertical",  # Légende en une colonne
+        legend.box = "horizontal",  # Gérer l'orientation de la légende
+        legend.key.size = unit(0.5, "cm"),  # Ajuster la taille des clés
+        legend.text = element_text(size = 8))  # Ajuster la taille du texte de la légende
+
+d <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = simpson, colour = site)) +
+  scale_color_manual(values = site_colors, breaks = site_order) +
+  #scale_y_continuous(limits = c(NA, 2.7)) +
+  labs(color = "Sites") +  # Ajouter le titre de la légende
+  theme_minimal() +
+  facet_grid(. ~ coral_type) +
+  theme(axis.text.x = element_blank(),
+        strip.placement = "outside",
+        legend.position = "top",
+        legend.direction = "vertical",  # Légende en une colonne
+        legend.box = "horizontal",  # Gérer l'orientation de la légende
+        legend.key.size = unit(0.5, "cm"),  # Ajuster la taille des clés
+        legend.text = element_text(size = 8))  # Ajuster la taille du texte de la légende
+
+e <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = pielou, colour = site)) +
+  scale_color_manual(values = site_colors, breaks = site_order) +
+  #scale_y_continuous(limits = c(NA, 2.7)) +
+  labs(color = "Sites") +  # Ajouter le titre de la légende
+  theme_minimal() +
+  facet_grid(. ~ coral_type) +
+  theme(axis.text.x = element_blank(),
+        strip.placement = "outside",
+        legend.position = "top",
+        legend.direction = "vertical",  # Légende en une colonne
+        legend.box = "horizontal",  # Gérer l'orientation de la légende
+        legend.key.size = unit(0.5, "cm"),  # Ajuster la taille des clés
+        legend.text = element_text(size = 8))  # Ajuster la taille du texte de la légende
+
+ggarrange(a, b, c, d, e, nrow = 5, ncol = 1, common.legend = T,  legend = "right")
+
+```
+
+# Boxplots par îles 
+```{r}
+a <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = richesse, colour = island)) +
+  #labs(title = "Richesse par îles") +
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+b <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = abondance, colour = island)) +
+  #labs(title = "Abondance par îles") +
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+c <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = shannon, colour = island)) +
+  #labs(title = "Indice de Shannon par îles et type de corail") +
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+d <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = simpson, colour = island)) +
+  #labs(title = "Indice de Simpson par îles") +
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+e <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = pielou, colour = island)) +
+  #labs(title = "Indice de Pielou par îles et type de corail") +
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+ggarrange(a, b, c, d, e, nrow = 5, ncol = 1, common.legend = T,  legend = "right")
+```
+
+# Boxplots par couverture corallienne 
+```{r}
+a <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = richesse, colour = coral_cover)) +
+ # labs(title = "Richesse par taux de recouvrement") +
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+b <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = abondance, colour = coral_cover)) +
+  #labs(title = "Abondance par taux de recouvrement") +
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+c <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = shannon, colour = coral_cover)) +
+  #labs(title = "Indice de Shannon par taux de recouvrement et type de corail") +
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+d <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = simpson, colour = coral_cover)) +
+  #labs(title = "Indice de Simpson par taux de recouvrement") +
+  theme_minimal() +
+  facet_grid(~ site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+e <- ggplot(tableau_final) +
+  geom_boxplot(aes(y = pielou, colour = coral_cover)) +
+  #labs(title = "Indice de Pielou par taux de recouvrement et type de corail") +
+  theme_minimal() +
+  facet_grid(~site) +
+  theme(axis.text.x = element_blank(),  # Supprimer les étiquettes de l'axe x dans les facettes
+        strip.placement = "outside")  # Déplacer les étiquettes de facettes en bas du graphique
+
+ggarrange(a, b, c, d, e, nrow = 5, ncol = 1, common.legend = T,  legend = "right")
+
+# # Combiner les graphiques avec une légende commune et ajouter un titre
+# combined_plot <- (a + b + c) / (d + e) + plot_layout(guides = "collect") +
+#   plot_annotation(title = "Boxplots par taux de recouvrement  et types de corail")
+# 
+# # Afficher le graphique combiné avec le titre
+# print(combined_plot)
+
+```
+
+# Dendrogramme
+```{r}
+data <- as.data.frame(read_csv("/Users/chloedouady/Library/CloudStorage/OneDrive-UniversitéLibredeBruxelles/M2/Mémoire/invertebres/tableau_d'identification_des_invertebres_final.csv")) %>% 
+  arrange(echantillons)
+rownames(data) <- data$echantillons #data[,6]
+
+# Compute Euclidean distance between samples
+#dist_chloe <- dist(data[ , c(7:49)], diag=TRUE)
+
+# Calculer la distance de Bray-Curtis entre les échantillons
+dist_chloe <- vegdist(data[ , c(7:49)], method = "bray")
+
+# Perfor clustering with hclust
+hc_chloe <- hclust(dist_chloe)
+dhc_chloe <- as.dendrogram(hc_chloe)
+
+# Plot
+par(mar=c(7,3,1,1))  # Increase bottom margin to have the complete label
+plot(dhc_chloe)
+
+# couleur
+i = 0
+colLab <<- function(n){
+  if(is.leaf(n)){
+    
+    #I take the current attributes
+    a = attributes(n)
+    
+    #I deduce the line in the original data, and so the treatment and the specie.
+    ligne = match(attributes(n)$label,data[,6])
+    
+    # if coral_cover
+    # cover = data[ligne,5];
+    # if(cover == "low"){col_cover = "blue"}; if(cover == "high"){col_cover="red"}
+    # attr(n,"nodePar") <- c(a$nodePar, list(cex=1.5, lab.cex=1, pch=20, col=col_cover, lab.font=1,lab.cex=1))
+    
+    # if coral_type and site
+    # cover = data[ligne,5];
+    # if(cover == "low"){col_cover = "#619CFF"}; if(cover == "high"){col_cover="#F8766D"}
+    # attr(n,"nodePar") <- c(a$nodePar, list(cex=1.5, lab.cex=1, pch=20, col=col_cover, lab.font=1,lab.cex=1))
+    # 
+    # site = data[ligne,2];
+    # if(site == "PIH"){col_site = "#77AADD"}; if(site == "TIA"){col_site="#99DDFF"};
+    # if(site == "BOU"){col_site = "#44BB99"}; if(site == "UNU"){col_site="#EE8866"};
+    # if(site == "DIA"){col_site = "#EEDD88"}; if(site == "GRO"){col_site="#FFAABB"}
+    # attr(n,"nodePar") <- c(a$nodePar,
+    #                        list(cex = 1.5, lab.cex = 1, pch = 20,
+    #                             col = col_cover, lab.col = col_site,
+    #                             lab.font = 1,lab.cex = 1))
+
+    # if island and coral_cover
+    cover = data[ligne,5];
+    if(cover == "low"){col_cover = "#619CFF"}; if(cover == "high"){col_cover="#F8766D"}
+
+    island = data[ligne,1];
+    if(island == "Tetiaroa"){col_island = "#99DDFF"};
+    if(island == "Tahiti"){col_island = "#EEDD88"};
+    if(island == "Moorea"){col_island = "#FFAABB"}
+    attr(n,"nodePar") <- c(a$nodePar,
+                           list(cex = 1.5, lab.cex = 1, pch = 20,
+                                col = col_cover, lab.col = col_island,
+                                lab.font = 1,lab.cex = 1))
+    
+    #Modification of leaf attribute
+  }
+  return(n)
+}
+
+# Finally I just have to apply this to my dendrogram
+dL <- dendrapply(dhc_chloe, colLab)
+
+# And the plot
+plot(dL, main = "structure of the population")
+
+# And the legend
+
+# if coral_type and site
+# legend("topright",
+#        legend = c("High coral cover", "Low coral cover"), #, "PIH", "TIA", "BOU", "UNU", "DIA", "GRO"),
+#        col = c("#F8766D", "#619CFF"), #, "#77AADD" , "#99DDFF" , "#44BB99", "#EE8866", "#EEDD88", "#FFAABB"),
+#        pch = c(20,20,4,4,4), bty = "n",  pt.cex = 1.5, cex = 0.8 ,
+#        text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+
+# if island and coral_cover
+legend("topright",
+       legend = c("High coral cover", "Low coral cover", "Tetiaroa", "Tahiti", "Moorea"),
+       col = c("#F8766D", "#619CFF", "#99DDFF", "#EEDD88", "#FFAABB"),
+       pch = c(20,20,4,4,4), bty = "n",  pt.cex = 1.5, cex = 0.8 ,
+       text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+# NMDS
+```{r}
+# Charger les données
+# data <- as.data.frame(read_csv("/Users/chloedouady/Library/CloudStorage/OneDrive-UniversitéLibredeBruxelles/M2/Mémoire/invertebres/tableau_d'identification_des_invertebres_final1.csv"))  
+file_path <- "C:\\Users\\Honor\\OneDrive - Université Libre de Bruxelles\\M2\\Mémoire\\invertebres\\tableau_d'identification_des_invertebres_final1.csv"
+data <- as.data.frame(read_csv(file_path))
+rownames(data) <- data$echantillons
+
+# Calculer la distance de Bray-Curtis entre les échantillons
+dist_chloe <- vegdist(data[ , c(7:49)], method = "bray", diag=TRUE)
+
+# Effectuer la NMDS
+nmds_chloe <- metaMDS(dist_chloe, k = 2, trymax = 100)
+
+# Préparer les données pour ggplot
+nmds_scores <- as.data.frame(nmds_chloe$points)
+nmds_scores$cover <- factor(data[,5], levels = c("high", "low"))
+nmds_scores$site <- factor(data[,2], levels = c("TIA", "PIH", "UNU", "BOU", "DIA", "GRO"))
+nmds_scores$type <- factor(data[,4], levels = c("A", "D", "DA"))
+nmds_scores$island <- factor(data[,1], levels = c("Moorea", "Tahiti", "Tetiaroa"))
+
+# Test de permutation pour NMDS (ANOSIM) -> évalue si les différences observées entre les groupes d'échantillons dans un espace NMDS sont statistiquement significatives
+anosim_result <- anosim(dist_chloe, nmds_scores$type)
+print(anosim_result)
+
+# Plot NMDS avec ggplot2
+p <- ggplot(nmds_scores, aes(x = MDS1, y = MDS2, colour = type, shape = site)) +
+  geom_point(size = 3) +
+  stat_ellipse(aes(group = type), level = 0.95, linetype = 2) +
+  theme_minimal() +
+  labs(title = "NMDS de la structure des communautés d'invertébrés",
+       subtitle = paste("Stress =", round(nmds_chloe$stress, 3)),
+       x = "Dimension 1",
+       y = "Dimension 2") +
+  theme(legend.position = "right") +
+  scale_color_manual(values = c("A" = "#619CFF", "D" = "#F8766D", "DA" = "#44BB99")) +
+  #scale_shape_manual(values = c("Moorea" = 20, "Tahiti" = 17, "Tetiaroa" = 4)) +
+  #scale_color_manual(values = c("Moorea" = "blue", "Tahiti" = "red", "Tetiaroa" = "green")) +
+  #scale_color_manual(values = c("low" = "#619CFF", "high" = "#F8766D")) +
+  scale_shape_manual(values = c("PIH" = 16, "TIA" = 17, "BOU" = 18, "UNU" = 4, "DIA" = 15, "GRO" = 8)) +
+  scale_x_continuous(name = "Dimension 1", breaks = seq(-2, 2, by = 0.5), limits = c(-2, 2)) +
+  scale_y_continuous(name = "Dimension 2", breaks = seq(-2, 2, by = 0.5), limits = c(-2, 2))
+
+# Ajouter le résultat du test de permutation
+p <- p + annotate("text", x = Inf, y = Inf, label = sprintf("ANOSIM R = %.2f\np-value = %.3f", anosim_result$statistic, anosim_result$signif), hjust = 1.1, vjust = 1, color = "black")
+
+# Afficher le graphique
+print(p)
+
+# Un faible stress signifie que les distances entre les points dans l'espace de dimensions réduites reflètent bien les distances originales entre les échantillons. Généralement, un stress inférieur à 0.1 est considéré comme une bonne représentation, entre 0.1 et 0.2 est acceptable, et au-dessus de 0.2, la représentation devient de moins en moins fiable.
+```
+
+```{r}
+# Charger les bibliothèques nécessaires
+library(readr)
+library(dplyr)
+library(vegan)
+library(ggplot2)
+
+# Lire le fichier CSV
+file_path <- "C:\\Users\\Honor\\OneDrive - Université Libre de Bruxelles\\M2\\Mémoire\\invertebres\\tableau_d'identification_des_invertebres_final1.csv"
+data <- as.data.frame(read_csv(file_path))
+rownames(data) <- data$echantillons
+
+# Calculer la distance de Bray-Curtis entre les échantillons
+dist_chloe <- vegdist(data[, 7:49], method = "bray", diag = TRUE)
+
+# Effectuer la NMDS
+nmds_chloe <- metaMDS(dist_chloe, k = 2, trymax = 100)
+
+# Préparer les données pour ggplot
+nmds_scores <- as.data.frame(nmds_chloe$points)
+nmds_scores$cover <- factor(data[, 5], levels = c("high", "low"))
+nmds_scores$site <- factor(data[, 2], levels = c("TIA", "PIH", "UNU", "BOU", "DIA", "GRO"))
+nmds_scores$type <- factor(data[, 4], levels = c("A", "D", "DA"))
+nmds_scores$island <- factor(data[, 1], levels = c("Moorea", "Tahiti", "Tetiaroa"))
+
+# Fusionner les catégories "D" et "DA" en une seule catégorie "D/DA"
+nmds_scores$type <- as.character(nmds_scores$type)
+nmds_scores$type[nmds_scores$type %in% c("D", "DA")] <- "D/DA"
+nmds_scores$type <- factor(nmds_scores$type, levels = c("A", "D/DA"))
+
+# Vérifier le nombre de réplicats par groupe après fusion
+table(nmds_scores$type)
+
+# Test de permutation pour NMDS (ANOSIM)
+anosim_result <- anosim(dist_chloe, nmds_scores$type)
+print(anosim_result)
+
+# Plot NMDS avec ggplot2
+p <- ggplot(nmds_scores, aes(x = MDS1, y = MDS2, colour = type, shape = site)) +
+  geom_point(size = 3) +
+  stat_ellipse(aes(group = type), level = 0.95, linetype = 2) +
+  theme_minimal() +
+  labs(title = "NMDS de la structure des communautés d'invertébrés",
+       subtitle = paste("Stress =", round(nmds_chloe$stress, 3)),
+       x = "Dimension 1",
+       y = "Dimension 2") +
+  theme(legend.position = "right") +
+  scale_color_manual(values = c("A" = "#619CFF", "D/DA" = "#F8766D")) +
+  scale_shape_manual(values = c("PIH" = 16, "TIA" = 17, "BOU" = 18, "UNU" = 4, "DIA" = 15, "GRO" = 8)) +
+  scale_x_continuous(name = "Dimension 1", breaks = seq(-2, 2, by = 0.5), limits = c(-2, 2)) +
+  scale_y_continuous(name = "Dimension 2", breaks = seq(-2, 2, by = 0.5), limits = c(-2, 2))
+
+# Ajouter le résultat du test de permutation
+p <- p + annotate("text", x = Inf, y = Inf, label = sprintf("ANOSIM R = %.2f\np-value = %.3f", anosim_result$statistic, anosim_result$signif), hjust = 1.1, vjust = 1, color = "black")
+
+# Afficher le graphique
+print(p)
+
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
