@@ -6,3 +6,5 @@ Le script python "début" a été utilisé pour l'alignement des photos. Le scri
 Les métriques de complexités ont été générées avec le code R s'intitulant "code_metriques_complexites". 
 
 L'analyse des variables de compléxités et de diversités ont été réalisées sur Rstudio version 2023.12.1. avec trois codes différents : "code_diversite", "analyse_complexites" et "code_complexite_diversite". 
+
+Vous trouverez les photos "modèle" des 83 morphotypes utilisés lors de l'étude ainsi qu'une petite description, dans le pdf "tableau descriptif des morphotypes". 
